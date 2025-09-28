@@ -1,0 +1,16 @@
+# Build artifacts
+bin/
+obj/
+
+# Visual Studio files
+*.user
+*.suo
+.vs/
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
+# Log files
+*.log
