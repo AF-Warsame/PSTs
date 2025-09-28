@@ -24,37 +24,61 @@ class PstDeletedItemsSplitter
 
     static DateTime GetMessageDate(MapiMessage message)
     {
-        // Try multiple date fields in order of preference
-        // 1. DeliveryTime - when the message was delivered
+        DateTime deliveryTime = default;
+        DateTime clientSubmitTime = default;
+        DateTime creationTime = default;
+        DateTime modificationTime = default;
+        
+        // Collect all available dates
         if (message.DeliveryTime != default)
-            return message.DeliveryTime;
+            deliveryTime = message.DeliveryTime;
             
-        // 2. ClientSubmitTime - when the sender submitted the message
         if (message.ClientSubmitTime != default)
-            return message.ClientSubmitTime;
+            clientSubmitTime = message.ClientSubmitTime;
             
-        // 3. Try to get creation time from properties
         try
         {
             var creationTimeProp = message.Properties[MapiPropertyTag.PR_CREATION_TIME];
             if (creationTimeProp != null && creationTimeProp.GetDateTime() != default)
-                return creationTimeProp.GetDateTime();
+                creationTime = creationTimeProp.GetDateTime();
         }
         catch
         {
             // Ignore property access errors
         }
         
-        // 4. Try to get last modification time from properties
         try
         {
             var modTimeProp = message.Properties[MapiPropertyTag.PR_LAST_MODIFICATION_TIME];
             if (modTimeProp != null && modTimeProp.GetDateTime() != default)
-                return modTimeProp.GetDateTime();
+                modificationTime = modTimeProp.GetDateTime();
         }
         catch
         {
             // Ignore property access errors
+        }
+        
+        // DEBUG: Log all available dates to understand the pattern
+        Console.WriteLine($"[DEBUG] Available dates - Delivery: {(deliveryTime == default ? "none" : deliveryTime.ToString("yyyy-MM-dd"))}, " +
+                         $"Submit: {(clientSubmitTime == default ? "none" : clientSubmitTime.ToString("yyyy-MM-dd"))}, " +
+                         $"Creation: {(creationTime == default ? "none" : creationTime.ToString("yyyy-MM-dd"))}, " +
+                         $"Modification: {(modificationTime == default ? "none" : modificationTime.ToString("yyyy-MM-dd"))}");
+        
+        // Prefer delivery time and client submit time as they represent the original message dates
+        if (deliveryTime != default)
+            return deliveryTime;
+            
+        if (clientSubmitTime != default)
+            return clientSubmitTime;
+            
+        if (creationTime != default)
+            return creationTime;
+        
+        // Only use modification time as a last resort, and warn about it
+        if (modificationTime != default)
+        {
+            Console.WriteLine($"[WARN] Using modification time {modificationTime:yyyy-MM-dd} - may not reflect original message date");
+            return modificationTime;
         }
             
         // If no valid date found, return default
@@ -87,11 +111,15 @@ class PstDeletedItemsSplitter
                     continue;
                 }
 
+                // DEBUG: Log the extracted date to understand the distribution
+                Console.WriteLine($"[DEBUG] Message date extracted: {messageDate:yyyy-MM-dd HH:mm:ss} (EntryId={mi.EntryIdString})");
+
                 bool addedToRange = false;
                 foreach (var range in pstMap.Keys)
                 {
                     if (messageDate >= range.Item1 && messageDate <= range.Item2)
                     {
+                        Console.WriteLine($"[DEBUG] Message {messageDate:yyyy-MM-dd} matched range {range.Item1:yyyy-MM-dd} to {range.Item2:yyyy-MM-dd}");
                         var destPst = pstMap[range];
                         var destFolder = GetOrCreateFolder(destPst, folderPath);
                         destFolder.AddMessage(full);
@@ -183,6 +211,13 @@ class PstDeletedItemsSplitter
         Directory.CreateDirectory(outputFolder);
 
         var yearRanges = GetYearRanges(2010, 2025, SpanYears);
+        
+        // DEBUG: Log the year ranges being used
+        Console.WriteLine("[DEBUG] Year ranges configured:");
+        foreach (var range in yearRanges)
+        {
+            Console.WriteLine($"[DEBUG]   {range.Start:yyyy-MM-dd} to {range.End:yyyy-MM-dd}");
+        }
 
         // Prepare destination PST files
         var pstMap = new Dictionary<(DateTime, DateTime), PersonalStorage>();
