@@ -22,7 +22,7 @@ class PstDeletedItemsSplitter
         return ranges;
     }
 
-    static DateTime GetMessageDate(MapiMessage message)
+    static DateTime GetMessageDate(MapiMessage message, bool preferOriginalDates = true)
     {
         DateTime deliveryTime = default;
         DateTime clientSubmitTime = default;
@@ -64,21 +64,50 @@ class PstDeletedItemsSplitter
                          $"Creation: {(creationTime == default ? "none" : creationTime.ToString("yyyy-MM-dd"))}, " +
                          $"Modification: {(modificationTime == default ? "none" : modificationTime.ToString("yyyy-MM-dd"))}");
         
-        // Prefer delivery time and client submit time as they represent the original message dates
-        if (deliveryTime != default)
-            return deliveryTime;
-            
-        if (clientSubmitTime != default)
-            return clientSubmitTime;
-            
-        if (creationTime != default)
-            return creationTime;
-        
-        // Only use modification time as a last resort, and warn about it
-        if (modificationTime != default)
+        if (preferOriginalDates)
         {
-            Console.WriteLine($"[WARN] Using modification time {modificationTime:yyyy-MM-dd} - may not reflect original message date");
-            return modificationTime;
+            // Prefer delivery time and client submit time as they represent the original message dates
+            if (deliveryTime != default)
+                return deliveryTime;
+                
+            if (clientSubmitTime != default)
+                return clientSubmitTime;
+                
+            if (creationTime != default)
+                return creationTime;
+            
+            // Only use modification time as a last resort, and warn about it
+            if (modificationTime != default)
+            {
+                Console.WriteLine($"[WARN] Using modification time {modificationTime:yyyy-MM-dd} - may not reflect original message date");
+                return modificationTime;
+            }
+        }
+        else
+        {
+            // Alternative strategy: prefer any non-recent date over recent modification times
+            var allDates = new List<DateTime>();
+            if (deliveryTime != default) allDates.Add(deliveryTime);
+            if (clientSubmitTime != default) allDates.Add(clientSubmitTime);
+            if (creationTime != default) allDates.Add(creationTime);
+            if (modificationTime != default) allDates.Add(modificationTime);
+            
+            // If we have multiple dates, prefer the oldest one that's not suspiciously recent
+            if (allDates.Count > 1)
+            {
+                var oldestNonRecent = allDates.Where(d => d.Year < DateTime.Now.Year - 1).OrderBy(d => d).FirstOrDefault();
+                if (oldestNonRecent != default)
+                {
+                    Console.WriteLine($"[INFO] Using oldest non-recent date: {oldestNonRecent:yyyy-MM-dd} (alternative strategy)");
+                    return oldestNonRecent;
+                }
+            }
+            
+            // Fall back to standard preference order
+            if (deliveryTime != default) return deliveryTime;
+            if (clientSubmitTime != default) return clientSubmitTime;
+            if (creationTime != default) return creationTime;
+            if (modificationTime != default) return modificationTime;
         }
             
         // If no valid date found, return default
@@ -93,17 +122,67 @@ class PstDeletedItemsSplitter
     {
         int processedCount = 0;
         int skippedCount = 0;
+        var extractedDates = new List<DateTime>();
+        bool preferOriginalDates = true;
         
-        // Enumerate lightweight message metadata
+        // First pass: collect dates to analyze distribution
+        var messages = new List<(MessageInfo mi, MapiMessage full)>();
         foreach (MessageInfo mi in srcFolder.EnumerateMessages())
         {
             MapiMessage? full = null;
             try
             {
-                full = sourcePst.ExtractMessage(mi); // Promote to full MapiMessage
-
-                // Try multiple date fields in order of preference
-                DateTime messageDate = GetMessageDate(full);
+                full = sourcePst.ExtractMessage(mi);
+                messages.Add((mi, full));
+                
+                DateTime messageDate = GetMessageDate(full, preferOriginalDates);
+                if (messageDate != default)
+                {
+                    extractedDates.Add(messageDate);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARN] Failed to extract message for analysis (EntryId={mi.EntryIdString}): {ex.Message}");
+                full?.Dispose();
+            }
+        }
+        
+        // Analyze date distribution to detect suspicious clustering
+        if (extractedDates.Count > 10) // Only analyze if we have enough messages
+        {
+            var recentDates = extractedDates.Where(d => d.Year >= 2024).Count();
+            var recentPercentage = (double)recentDates / extractedDates.Count * 100;
+            
+            if (recentPercentage > 80) // If more than 80% of dates are in 2024+
+            {
+                Console.WriteLine($"[WARN] Detected suspicious date clustering: {recentPercentage:F1}% of dates are in 2024+");
+                Console.WriteLine("[INFO] Switching to alternative date extraction strategy to find older dates...");
+                preferOriginalDates = false;
+                extractedDates.Clear();
+                
+                // Re-extract dates with alternative strategy
+                foreach (var (mi, full) in messages)
+                {
+                    DateTime messageDate = GetMessageDate(full, preferOriginalDates);
+                    if (messageDate != default)
+                    {
+                        extractedDates.Add(messageDate);
+                    }
+                }
+                
+                var newRecentDates = extractedDates.Where(d => d.Year >= 2024).Count();
+                var newRecentPercentage = extractedDates.Count > 0 ? (double)newRecentDates / extractedDates.Count * 100 : 0;
+                Console.WriteLine($"[INFO] After alternative strategy: {newRecentPercentage:F1}% of dates are in 2024+");
+            }
+        }
+        
+        // Second pass: process messages with determined strategy
+        foreach (var (mi, full) in messages)
+        {
+            try
+            {
+                DateTime messageDate = GetMessageDate(full, preferOriginalDates);
                 if (messageDate == default)
                 {
                     Console.WriteLine($"[WARN] Message has no valid date fields, skipping (EntryId={mi.EntryIdString})");
