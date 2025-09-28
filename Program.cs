@@ -22,39 +22,97 @@ class PstDeletedItemsSplitter
         return ranges;
     }
 
-    static DateTime GetMessageDate(MapiMessage message)
+    static DateTime GetMessageDate(MapiMessage message, bool preferOriginalDates = true)
     {
-        // Try multiple date fields in order of preference
-        // 1. DeliveryTime - when the message was delivered
+        DateTime deliveryTime = default;
+        DateTime clientSubmitTime = default;
+        DateTime creationTime = default;
+        DateTime modificationTime = default;
+        
+        // Collect all available dates
         if (message.DeliveryTime != default)
-            return message.DeliveryTime;
+            deliveryTime = message.DeliveryTime;
             
-        // 2. ClientSubmitTime - when the sender submitted the message
         if (message.ClientSubmitTime != default)
-            return message.ClientSubmitTime;
+            clientSubmitTime = message.ClientSubmitTime;
             
-        // 3. Try to get creation time from properties
         try
         {
             var creationTimeProp = message.Properties[MapiPropertyTag.PR_CREATION_TIME];
             if (creationTimeProp != null && creationTimeProp.GetDateTime() != default)
-                return creationTimeProp.GetDateTime();
+                creationTime = creationTimeProp.GetDateTime();
         }
         catch
         {
             // Ignore property access errors
         }
         
-        // 4. Try to get last modification time from properties
         try
         {
             var modTimeProp = message.Properties[MapiPropertyTag.PR_LAST_MODIFICATION_TIME];
             if (modTimeProp != null && modTimeProp.GetDateTime() != default)
-                return modTimeProp.GetDateTime();
+                modificationTime = modTimeProp.GetDateTime();
         }
         catch
         {
             // Ignore property access errors
+        }
+        
+        // DEBUG: Log all available dates to understand the pattern
+        if (false) // Set to true for detailed debugging
+        {
+            Console.WriteLine($"[DEBUG] Available dates - Delivery: {(deliveryTime == default ? "none" : deliveryTime.ToString("yyyy-MM-dd"))}, " +
+                             $"Submit: {(clientSubmitTime == default ? "none" : clientSubmitTime.ToString("yyyy-MM-dd"))}, " +
+                             $"Creation: {(creationTime == default ? "none" : creationTime.ToString("yyyy-MM-dd"))}, " +
+                             $"Modification: {(modificationTime == default ? "none" : modificationTime.ToString("yyyy-MM-dd"))}");
+        }
+        
+        if (preferOriginalDates)
+        {
+            // Prefer delivery time and client submit time as they represent the original message dates
+            if (deliveryTime != default)
+                return deliveryTime;
+                
+            if (clientSubmitTime != default)
+                return clientSubmitTime;
+                
+            if (creationTime != default)
+                return creationTime;
+            
+            // Only use modification time as a last resort
+            if (modificationTime != default)
+            {
+                if (false) // Set to true for detailed debugging
+                    Console.WriteLine($"[WARN] Using modification time {modificationTime:yyyy-MM-dd} - may not reflect original message date");
+                return modificationTime;
+            }
+        }
+        else
+        {
+            // Alternative strategy: prefer any non-recent date over recent modification times
+            var allDates = new List<DateTime>();
+            if (deliveryTime != default) allDates.Add(deliveryTime);
+            if (clientSubmitTime != default) allDates.Add(clientSubmitTime);
+            if (creationTime != default) allDates.Add(creationTime);
+            if (modificationTime != default) allDates.Add(modificationTime);
+            
+            // If we have multiple dates, prefer the oldest one that's not suspiciously recent
+            if (allDates.Count > 1)
+            {
+                var oldestNonRecent = allDates.Where(d => d.Year < DateTime.Now.Year - 1).OrderBy(d => d).FirstOrDefault();
+                if (oldestNonRecent != default)
+                {
+                    if (false) // Set to true for detailed debugging
+                        Console.WriteLine($"[INFO] Using oldest non-recent date: {oldestNonRecent:yyyy-MM-dd} (alternative strategy)");
+                    return oldestNonRecent;
+                }
+            }
+            
+            // Fall back to standard preference order
+            if (deliveryTime != default) return deliveryTime;
+            if (clientSubmitTime != default) return clientSubmitTime;
+            if (creationTime != default) return creationTime;
+            if (modificationTime != default) return modificationTime;
         }
             
         // If no valid date found, return default
@@ -69,29 +127,86 @@ class PstDeletedItemsSplitter
     {
         int processedCount = 0;
         int skippedCount = 0;
+        var extractedDates = new List<DateTime>();
+        bool preferOriginalDates = true;
         
-        // Enumerate lightweight message metadata
+        // First pass: collect dates to analyze distribution
+        var messages = new List<(MessageInfo mi, MapiMessage full)>();
         foreach (MessageInfo mi in srcFolder.EnumerateMessages())
         {
             MapiMessage? full = null;
             try
             {
-                full = sourcePst.ExtractMessage(mi); // Promote to full MapiMessage
-
-                // Try multiple date fields in order of preference
-                DateTime messageDate = GetMessageDate(full);
+                full = sourcePst.ExtractMessage(mi);
+                messages.Add((mi, full));
+                
+                DateTime messageDate = GetMessageDate(full, preferOriginalDates);
+                if (messageDate != default)
+                {
+                    extractedDates.Add(messageDate);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARN] Failed to extract message for analysis (EntryId={mi.EntryIdString}): {ex.Message}");
+                full?.Dispose();
+            }
+        }
+        
+        // Analyze date distribution to detect suspicious clustering
+        if (extractedDates.Count > 10) // Only analyze if we have enough messages
+        {
+            var recentDates = extractedDates.Where(d => d.Year >= 2024).Count();
+            var recentPercentage = (double)recentDates / extractedDates.Count * 100;
+            
+            if (recentPercentage > 80) // If more than 80% of dates are in 2024+
+            {
+                Console.WriteLine($"[WARN] Detected suspicious date clustering: {recentPercentage:F1}% of dates are in 2024+");
+                Console.WriteLine("[INFO] Switching to alternative date extraction strategy to find older dates...");
+                preferOriginalDates = false;
+                extractedDates.Clear();
+                
+                // Re-extract dates with alternative strategy
+                foreach (var (mi, full) in messages)
+                {
+                    DateTime messageDate = GetMessageDate(full, preferOriginalDates);
+                    if (messageDate != default)
+                    {
+                        extractedDates.Add(messageDate);
+                    }
+                }
+                
+                var newRecentDates = extractedDates.Where(d => d.Year >= 2024).Count();
+                var newRecentPercentage = extractedDates.Count > 0 ? (double)newRecentDates / extractedDates.Count * 100 : 0;
+                Console.WriteLine($"[INFO] After alternative strategy: {newRecentPercentage:F1}% of dates are in 2024+");
+            }
+        }
+        
+        // Second pass: process messages with determined strategy
+        foreach (var (mi, full) in messages)
+        {
+            try
+            {
+                DateTime messageDate = GetMessageDate(full, preferOriginalDates);
                 if (messageDate == default)
                 {
-                    Console.WriteLine($"[WARN] Message has no valid date fields, skipping (EntryId={mi.EntryIdString})");
+                    if (false) // Set to true for detailed debugging
+                        Console.WriteLine($"[WARN] Message has no valid date fields, skipping (EntryId={mi.EntryIdString})");
                     skippedCount++;
                     continue;
                 }
+
+                // DEBUG: Log the extracted date to understand the distribution
+                if (false) // Set to true for detailed debugging
+                    Console.WriteLine($"[DEBUG] Message date extracted: {messageDate:yyyy-MM-dd HH:mm:ss} (EntryId={mi.EntryIdString})");
 
                 bool addedToRange = false;
                 foreach (var range in pstMap.Keys)
                 {
                     if (messageDate >= range.Item1 && messageDate <= range.Item2)
                     {
+                        if (false) // Set to true for detailed debugging
+                            Console.WriteLine($"[DEBUG] Message {messageDate:yyyy-MM-dd} matched range {range.Item1:yyyy-MM-dd} to {range.Item2:yyyy-MM-dd}");
                         var destPst = pstMap[range];
                         var destFolder = GetOrCreateFolder(destPst, folderPath);
                         destFolder.AddMessage(full);
@@ -103,7 +218,8 @@ class PstDeletedItemsSplitter
                 
                 if (!addedToRange)
                 {
-                    Console.WriteLine($"[WARN] Message date {messageDate:yyyy-MM-dd} outside all ranges, skipping (EntryId={mi.EntryIdString})");
+                    if (false) // Set to true for detailed debugging
+                        Console.WriteLine($"[WARN] Message date {messageDate:yyyy-MM-dd} outside all ranges, skipping (EntryId={mi.EntryIdString})");
                     skippedCount++;
                 }
             }
@@ -183,6 +299,16 @@ class PstDeletedItemsSplitter
         Directory.CreateDirectory(outputFolder);
 
         var yearRanges = GetYearRanges(2010, 2025, SpanYears);
+        
+        // DEBUG: Log the year ranges being used
+        if (false) // Set to true for detailed debugging
+        {
+            Console.WriteLine("[DEBUG] Year ranges configured:");
+            foreach (var range in yearRanges)
+            {
+                Console.WriteLine($"[DEBUG]   {range.Start:yyyy-MM-dd} to {range.End:yyyy-MM-dd}");
+            }
+        }
 
         // Prepare destination PST files
         var pstMap = new Dictionary<(DateTime, DateTime), PersonalStorage>();
