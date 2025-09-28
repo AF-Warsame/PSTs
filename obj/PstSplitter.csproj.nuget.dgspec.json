@@ -1,24 +1,27 @@
 {
   "format": 1,
   "restore": {
-    "E:\\Warsame's Folders\\PSTs\\PstSplitter\\PstSplitter.csproj": {}
+    "/home/runner/work/PSTs/PSTs/PstSplitter.csproj": {}
   },
   "projects": {
-    "E:\\Warsame's Folders\\PSTs\\PstSplitter\\PstSplitter.csproj": {
+    "/home/runner/work/PSTs/PSTs/PstSplitter.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "E:\\Warsame's Folders\\PSTs\\PstSplitter\\PstSplitter.csproj",
+        "projectUniqueName": "/home/runner/work/PSTs/PSTs/PstSplitter.csproj",
         "projectName": "PstSplitter",
-        "projectPath": "E:\\Warsame's Folders\\PSTs\\PstSplitter\\PstSplitter.csproj",
-        "packagesPath": "C:\\Users\\awarsame\\.nuget\\packages\\",
-        "outputPath": "E:\\Warsame's Folders\\PSTs\\PstSplitter\\obj\\",
+        "projectPath": "/home/runner/work/PSTs/PSTs/PstSplitter.csproj",
+        "packagesPath": "/home/runner/.nuget/packages/",
+        "outputPath": "/home/runner/work/PSTs/PSTs/obj/",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "C:\\Users\\awarsame\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "/home/runner/.nuget/NuGet/NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net7.0"
         ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
         "frameworks": {
           "net7.0": {
             "targetAlias": "net7.0",
@@ -51,12 +54,26 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
+          "downloadDependencies": [
+            {
+              "name": "Microsoft.AspNetCore.App.Ref",
+              "version": "[7.0.20, 7.0.20]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Host.linux-x64",
+              "version": "[7.0.20, 7.0.20]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Ref",
+              "version": "[7.0.20, 7.0.20]"
+            }
+          ],
           "frameworkReferences": {
             "Microsoft.NETCore.App": {
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.305\\RuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/9.0.305/RuntimeIdentifierGraph.json"
         }
       }
     }

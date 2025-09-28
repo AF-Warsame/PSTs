@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PstSplitter")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2a7a5a58bec60f63a0718b66ee204e5ae72acfc1")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a58acef8b6dd6466d4f16e58e77f436babd34425")]
 [assembly: System.Reflection.AssemblyProductAttribute("PstSplitter")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PstSplitter")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
